@@ -21,5 +21,7 @@ sudo apt install cmake
 ## Run
 
 ```
-./sf-interpreter [FILENAME]
+# executes a given assembly program and prints status to "sf-interpreter.log"
+# note that it gets a standard input on call to "read"
+./sf-interpreter <input assembly file>
 ```
