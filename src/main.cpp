@@ -26,19 +26,18 @@ int main(int argc, char** argv) {
 
   State state;
   state.set_program(program);
-
-  Function* main = program->get_function("main");
-  if (main == nullptr)
-    invoke_runtime_error("missing main function");
-
-  uint64_t ret = state.exec_function(main);
+  uint64_t ret = state.exec_program();
 
   ofstream log("sf-interpreter.log");
   log << fixed << setprecision(4);
   log << "Returned: " << ret << endl;
-  log << "Cost: " << state.get_cost() << endl;
+  log << "Cost: " << state.get_cost_value() << endl;
   log << "Max heap usage (bytes): " << state.get_max_alloced_size() << endl;
   log.close();
+
+  ofstream cost_log("sf-interpreter-cost.log");
+  cost_log << state.get_cost()->to_string("");
+  cost_log.close();
 
   return 0;
 }

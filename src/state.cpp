@@ -1,21 +1,59 @@
+#include <sstream>
+#include <iomanip>
+
 #include "state.h"
 #include "error.h"
 
 
-State::State(): regfile(), memory(), cost(0), program(nullptr) {}
+CostStack::CostStack(const string &_fname): fname(_fname), cost(0), callees() {}
+
+double CostStack::get_cost() const { return cost; }
+
+void CostStack::add_cost(double _cost) { cost += _cost; }
+
+void CostStack::set_callee(CostStack *callee) {
+  callees.push_back(callee);
+}
+
+void CostStack::evaluate() {
+  for (auto it: callees) {
+    it->evaluate();
+    cost += it->get_cost();
+  }
+}
+
+string CostStack::to_string(const string& indent) const {
+  stringstream ss;
+  ss << fixed << setprecision(4);
+  ss << indent << fname << ": " << cost << endl;
+  for (auto it: callees)
+    ss << it->to_string(indent + "| ");
+  return ss.str();
+}
+
+
+State::State(): regfile(), memory(), main_cost(nullptr), program(nullptr) {}
 
 void State::set_program(Program* _program) {
   if (program == nullptr)
     program = _program;
 }
 
-double State::get_cost() const { return cost; }
+double State::get_cost_value() const { return main_cost->get_cost(); }
+
+CostStack * State::get_cost() const { return main_cost; }
 
 uint64_t State::get_max_alloced_size() const {
   return memory.get_max_alloced_size();
 }
 
-uint64_t State::exec_function(Function* function) {
+uint64_t State::exec_function(CostStack* parent, Function* function) {
+  auto cost = new CostStack(function->get_fname());
+  if (parent == nullptr)
+    main_cost = cost;
+  else
+    parent->set_callee(cost);
+
   Stmt* curr = function->get_first_bb();
   if (curr == nullptr)
     invoke_runtime_error("missing first basic block");
@@ -27,7 +65,7 @@ uint64_t State::exec_function(Function* function) {
       case Ret: {
         auto stmt = dynamic_cast<StmtRet*>(curr);
         uint64_t ret = stmt->get_val().get_value(regfile);
-        cost += Cost::TERMINATOR;
+        cost->add_cost(Cost::TERMINATOR);
         return ret;
       }
       case BrUncond: {
@@ -38,7 +76,7 @@ uint64_t State::exec_function(Function* function) {
           invoke_runtime_error("branching to an undefined basic block");
           return 0;
         }
-        cost += Cost::TERMINATOR;
+        cost->add_cost(Cost::TERMINATOR);
         break;
       }
       case BrCond: {
@@ -49,7 +87,7 @@ uint64_t State::exec_function(Function* function) {
           invoke_runtime_error("branching to an undefined basic block");
           return 0;
         }
-        cost += Cost::TERMINATOR;
+        cost->add_cost(Cost::TERMINATOR);
         break;
       }
       case Switch: {
@@ -60,7 +98,7 @@ uint64_t State::exec_function(Function* function) {
           invoke_runtime_error("branching to an undefined basic block");
           return 0;
         }
-        cost += Cost::TERMINATOR;
+        cost->add_cost(Cost::TERMINATOR);
         break;
       }
       case Call: {
@@ -82,8 +120,8 @@ uint64_t State::exec_function(Function* function) {
 
         regfile.set_nargs(nargs);
         stmt->setup_args(old, regfile);
-        cost += (Cost::CALL + nargs * Cost::PER_ARG);
-        uint64_t ret = exec_function(callee);
+        cost->add_cost(Cost::CALL + nargs * Cost::PER_ARG);
+        uint64_t ret = exec_function(cost, callee);
         regfile = old;
         regfile.write_reg(curr->get_lhs(), ret);
 
@@ -91,9 +129,18 @@ uint64_t State::exec_function(Function* function) {
         break;
       }
       default: {
-        cost += curr->exec(regfile, memory);
+        cost->add_cost(curr->exec(regfile, memory));
         curr = curr->get_next();
       }
     }
   }
+}
+
+uint64_t State::exec_program() {
+  Function* main = program->get_function("main");
+  if (main == nullptr)
+    invoke_runtime_error("missing main function");
+  uint64_t res = exec_function(nullptr, main);
+  main_cost->evaluate();
+  return res;
 }
